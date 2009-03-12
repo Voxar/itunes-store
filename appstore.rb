@@ -2,8 +2,6 @@
 =begin
 
   Author: Patrik Sjöberg <voxxar@gmail.com>
-    Date: 19 Feb 2009
- Version: 0.1.1
     
   Searches your imap enabled mail account for iTunes receipts and displays statistics abount 
   your purchases.
@@ -11,9 +9,9 @@
   Using: 
     
     If you have a gmail account:
-     1. run 'ruby appstore.rb'
-     2. enter username
-     3. enter password
+      1. run 'ruby appstore.rb'
+      2. enter username
+      3. enter password
      
     If you have an account other than gmail:
       1. run 'ruby appstore.rb --host <server address> --port <server port> \
@@ -25,16 +23,22 @@
   see --help for options
   
   Known problems: 
-    * Probably only works if currency is behind the price
+    * Don't know how how receipts for tv-shows look so there is a possibility they will be mistaken for music
+    * Probably only works if currency is behind the price (default in sweden)
     * All receipts are assumed to be in the same mailbox.
       "[Gmail]/All Mail" is default. use --mailbox to change
     * Password is plain text in terminal
     * 'NoMethodError: undefined method ‘dump’ for nil:NilClass'
-      - Seems to happen on WiFi. Connection too slow for threaded download?
+      - Seems to happen on slow WiFi. Connection too slow for threaded download? No problem on 802.11n-network
     * Plain text version of receipts have fixed width descriptions so the 
       seller field is missing or incomplete if app name is too long
   
   Changelog:
+    12 March 2009 - 0.2:
+      * Counts and lists music!
+      * Total spent on apps and music
+      * 20 threads to download mail
+      
     19 Feb 2009 - 0.1.1:
       * Changed default mailbox to '[Gmail]/All Mail'
       * Searches all mail in gmail
@@ -45,16 +49,16 @@
       
       
   TODO:
+    * Include tv-shows. (need help by someone who can buy tv-shows...)
+    * List free items (not by default)
     * More stats and graphs!
     * HTML output (maybe eaven xml?)
     * JSON output
-    * Confirm counts (off by one for some reason)
-    * Dont spam too many threads when downloading
-    * Why did the code get so ugly after 0.1.0? FIX!
+    * Confirm counts
     * Map by 'item number' so we can collect info on other stuff in the store, like tvshows
 
 =end
-#ARGV.push *'-d mails'.split
+#ARGV.push *'-d ~/Desktop/mails2'.split #for debug
 
 require 'net/imap'
 require 'set'
@@ -93,7 +97,8 @@ options = {
   :port => 993,
   :ssl => true,
   :mailbox => '[Gmail]/All Mail',
-  :stats => true,
+  :appstats => true,
+  :musicstats => true,
   :paid => true,
   :free => false,
   :path => nil,
@@ -292,12 +297,17 @@ data = data.each do |mail|
       }
     else
       #is it music? Yeah probably
-      music << item
+      music << {
+        :name => description,
+        :price => price,
+        :date => mail[:date]
+      }
     end
   end.compact
 end.flatten
 
 def gen_stats list
+  #count free, paid, updates etc
   names = list.map{ |a| a[:name] }
   names_set = Set.new(names)
 
@@ -382,7 +392,55 @@ def list_apps options, app_stats
   end
   puts ""
   
-  #print all free apps
+  #TODO: option to print all free apps
+end
+
+def list_music options, music_stats
+  #list paid music
+  width_name = 14
+  width_price = 8
+  width_date = 0
+
+  def max a,b; return a if a > b; b; end
+  #find minimum widths
+  music_stats[:paid].each do |music|
+    width_name = max(width_name, music[:name].length+1)
+    width_price = max(width_price, music[:price].length+1)
+    width_date = max(width_date, music[:date].length+1)
+  end
+
+  puts ""
+  puts "Paid music"
+  puts ""
+
+  #make some cols left justified
+  width_name   *= -1
+  width_price  *=  1
+  width_date   *= -1
+
+  dataformatstr = "%1$*2$s  %3$*4$s  %5$*6$s"
+
+  # a nice header
+  args = [ 'Name', width_name, 'Price', width_price, 'Date', width_date ]
+  puts txt_header =dataformatstr%args
+  args = [ '----', width_name, '-----', width_price, '----', width_date ]
+  puts dataformatstr%args
+
+  def sortfun(a,b)
+    d = b[:price].to_f - a[:price].to_f
+    return d if d != 0.0
+    a[:name] <=> b[:name]
+  end
+  #print all paid apps
+  music_stats[:paid].sort(&method(:sortfun)).each do |music|
+    args = [ music[:name], width_name,
+             music[:price], width_price,
+             music[:date], width_date ]
+    puts dataformatstr%args
+  end
+  puts ""
+  
+  #TODO: option to print all free music
 end
 
 def stats_by_wday apps
@@ -440,17 +498,19 @@ def fartapps apps
   puts "Number of obvious fart apps: #{count}",""
 end
 app_stats = gen_stats(apps)
+music_stats = gen_stats(music)
 
 list_apps options, app_stats
+list_music options, music_stats
 
 stats_by_wday apps
 stats_by_months apps
 fartapps apps
 
 #Show statistics?
-if options[:stats]
+if options[:appstats]
   #Print totals
-  puts txt_stat = "Statistics:"
+  puts txt_stat = "Apps statistics:"
   puts "-"*txt_stat.length
   puts " Total applications: #{app_stats[:names_set].length}"
   puts "    Total free apps: #{app_stats[:free_names_set].length}" #dont count updates
@@ -459,8 +519,26 @@ if options[:stats]
   puts " Total paid updates: #{app_stats[:paid_updates]}"
   #take an amount and replace the value to get the right currency
   spent_str = app_stats[:paid].first[:price].sub(/\d+.\d+/, app_stats[:money_spent].to_s)
-  puts "  Total money spent: #{spent_str}"
+  puts "Total spent on apps: #{spent_str}"
 end
+
+puts " "
+if options[:musicstats]
+  #Print totals
+  puts txt_stat = "Music statistics:"
+  puts "-"*txt_stat.length
+  puts "         Total music: #{music_stats[:names_set].length}"
+  puts "    Total free music: #{music_stats[:free_names_set].length}"
+  puts "    Total paid music: #{music_stats[:paid_names_set].length}"
+  #take an amount and replace the value to get the right currency
+  spent_str = music_stats[:paid].first[:price].sub(/\d+.\d+/, music_stats[:money_spent].to_s)
+  puts "Total spent on music: #{spent_str}"
+end
+
+puts ""
+#take an amount and replace the value to get the right currency
+spent_str = app_stats[:paid].first[:price].sub(/\d+.\d+/, (app_stats[:money_spent] + music_stats[:money_spent]).to_s)
+puts "Total spent in the iTunes Store: #{spent_str}"
 
 items = data.map do |mail|
   mail[:items]
