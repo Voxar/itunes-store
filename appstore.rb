@@ -103,7 +103,7 @@ options = {
   :paid => true,
   :free => false,
   :path => nil,
-  :list => {:paid_apps=>true, :paid_music=>true}
+  :list => {:paid_apps=>true, :free_apps => true, :paid_music=>true, :free_music => true}
 }
 OptionParser.new do |opts|
   opts.banner = "Usage: appstore.rb [options]\n"
@@ -368,7 +368,10 @@ def list_apps options, app_stats
   #what to include
   list = []
   list += app_stats[:paid] if options[:list][:paid_apps]
-  list += app_stats[:free] if options[:list][:free_apps]
+  if options[:list][:free_apps]
+    set = Set.new
+    list += app_stats[:free].reject { |i| !set.add?(i[:name]) } #filter free updates
+  end
   
   width_name = 14
   width_price = 8
@@ -430,7 +433,10 @@ def list_music options, music_stats
   #What to include
   list = []
   list += music_stats[:paid] if options[:list][:paid_music]
-  list += music_stats[:free] if options[:list][:free_music]
+  if options[:list][:free_music]
+    set = Set.new
+    list += music_stats[:free].reject { |i| !set.add?(i[:name]) }#filter updates. Whait.. This is music!?!?
+  end
   
   #list paid music
   width_name = 14
