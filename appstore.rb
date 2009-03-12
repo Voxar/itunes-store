@@ -39,6 +39,7 @@
       * Total spent on apps and music
       * 20 threads to download mail
       * Option to list paid or free, music or apps, or all
+      * Masked password if you have installed the highline gem
       
     19 Feb 2009 - 0.1.1:
       * Changed default mailbox to '[Gmail]/All Mail'
@@ -68,6 +69,29 @@ require 'optparse'
 
 
 #helpers
+def req name
+  begin
+    require name
+    true
+  rescue LoadError => e
+    p e
+  end
+end
+    
+def get_password
+  req 'rubygems'
+  if req('highline')
+    h = HighLine.new
+    h.ask("Password: ") { |q| q.echo = '*'}
+  else
+    puts "ruby gem highline not found. Password will be plain text."
+    puts " To enable masked password in terminal, run 'sudo gem install highline'"
+    puts "Enter password (caution, will be visible!)"
+    STDIN.readline.strip
+  end
+end
+p get_password
+exit
 class String
   #itunes date (day/month/year) to Time
   def to_date
@@ -221,8 +245,7 @@ def receipts_from_imap options
     puts "Enter username (e.g example@gmail.com)"
     options[:username] = STDIN.readline.strip
   end
-  puts "Enter password (caution, will be visible!)"
-  options[:password] = STDIN.readline.strip
+  options[:password] = get_password
   
   #check the mail
   puts "Connecting to #{options[:host]}:#{options[:port]} #{"using ssl" if options[:ssl]}"
