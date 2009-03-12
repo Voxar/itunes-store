@@ -38,6 +38,7 @@
       * Counts and lists music!
       * Total spent on apps and music
       * 20 threads to download mail
+      * Option to list paid or free, music or apps, or all
       
     19 Feb 2009 - 0.1.1:
       * Changed default mailbox to '[Gmail]/All Mail'
@@ -58,13 +59,13 @@
     * Map by 'item number' so we can collect info on other stuff in the store, like tvshows
 
 =end
-#ARGV.push *'-d ~/Desktop/mails2'.split #for debug
+#ARGV.push *%w(-d ~/Desktop/mails2) #for debug
 
 require 'net/imap'
 require 'set'
 
 require 'optparse'
-#ARGV.push(*%w(--directory mails)) #for debug
+
 
 #helpers
 class String
@@ -102,10 +103,12 @@ options = {
   :paid => true,
   :free => false,
   :path => nil,
-  :list => [:all, :paid]
+  :list => {:paid_apps=>true, :paid_music=>true}
 }
 OptionParser.new do |opts|
-  opts.banner = "Usage: appstore.rb [options]"
+  opts.banner = "Usage: appstore.rb [options]\n"
+  opts.banner += "Example: appstore.rb -l free_apps,paid_music\n"
+  opts.banner += " Lists only free apps and paid music"
   
   opts.separator ""
   opts.separator "User options:"
@@ -120,9 +123,22 @@ OptionParser.new do |opts|
   
   opts.separator ""
   opts.separator "Output options:"
-  
-  opts.on("-l", "--list x", "List outputs (all, apps, music, other, free, paid)") do |v|
-    options[:list] = v.split(",").map{ |i| i.to_sym }
+
+  opts.on("-l", "--list x", "List outputs (all, paid, free, free_apps, free_music, paid_apps, paid_music)") do |v|
+    values = v.split(",")
+    valid = %w(all free paid free_apps free_music paid_apps paid_music)
+    values.each do |v|
+      if !valid.include?(v)
+        puts "invalid --list argument: #{v}"
+        exit 1
+      end
+    end
+    options[:list] = {
+      :free_apps  => values.include?('free_apps')  || values.include?('all') || values.include?('free'),
+      :paid_apps  => values.include?('paid_apps')  || values.include?('all') || values.include?('paid'),
+      :free_music => values.include?('free_music') || values.include?('all') || values.include?('free'),
+      :paid_music => values.include?('paid_music') || values.include?('all') || values.include?('paid'),
+    }
   end
   
   opts.separator ""
@@ -274,6 +290,10 @@ end
 data = receipts_from_dir(options)  if options[:path]
 data = receipts_from_imap(options) if !data
 
+if !data or data.length == 0
+  puts "No data could be found"
+  exit 1
+end
 
 #get all items from all mail and map them to their types
 apps = []
@@ -345,6 +365,11 @@ end
 
 #show paid apps?
 def list_apps options, app_stats
+  #what to include
+  list = []
+  list += app_stats[:paid] if options[:list][:paid_apps]
+  list += app_stats[:free] if options[:list][:free_apps]
+  
   width_name = 14
   width_price = 8
   width_seller = 14
@@ -352,7 +377,7 @@ def list_apps options, app_stats
 
   def max a,b; return a if a > b; b; end
   #find minimum widths
-  app_stats[:paid].each do |app|
+  list.each do |app|
     width_name = max(width_name, app[:name].length+1)
     width_price = max(width_price, app[:price].length+1)
     width_seller = max(width_seller, app[:seller].length+1)
@@ -360,9 +385,16 @@ def list_apps options, app_stats
   end
 
   puts ""
-  puts "Paid apps"
+  puts "Applications - iPhone and iPod Touch"
+  
+  if list.length == 0
+    puts "Could not find any data about applications\n"
+    puts ""
+    return
+  end
+  
   puts ""
-
+    
   #make some cols left justified
   width_name   *= -1
   width_price  *=  1
@@ -382,8 +414,8 @@ def list_apps options, app_stats
     return d if d != 0.0
     a[:name] <=> b[:name]
   end
-  #print all paid apps
-  app_stats[:paid].sort(&method(:sortfun)).each do |app|
+  #print apps
+  list.sort(&method(:sortfun)).each do |app|
     args = [ app[:name], width_name,
              app[:price], width_price,
              app[:seller],  width_seller,
@@ -391,11 +423,15 @@ def list_apps options, app_stats
     puts dataformatstr%args
   end
   puts ""
-  
-  #TODO: option to print all free apps
 end
 
+#print report on music
 def list_music options, music_stats
+  #What to include
+  list = []
+  list += music_stats[:paid] if options[:list][:paid_music]
+  list += music_stats[:free] if options[:list][:free_music]
+  
   #list paid music
   width_name = 14
   width_price = 8
@@ -403,14 +439,21 @@ def list_music options, music_stats
 
   def max a,b; return a if a > b; b; end
   #find minimum widths
-  music_stats[:paid].each do |music|
+  list.each do |music|
     width_name = max(width_name, music[:name].length+1)
     width_price = max(width_price, music[:price].length+1)
     width_date = max(width_date, music[:date].length+1)
   end
 
   puts ""
-  puts "Paid music"
+  puts "Music - Songs, singles and records"
+  
+  if list.length == 0
+    puts "Could not find any data about music\n"
+    puts ""
+    return
+  end
+  
   puts ""
 
   #make some cols left justified
@@ -431,16 +474,14 @@ def list_music options, music_stats
     return d if d != 0.0
     a[:name] <=> b[:name]
   end
-  #print all paid apps
-  music_stats[:paid].sort(&method(:sortfun)).each do |music|
+  #print music
+  list.sort(&method(:sortfun)).each do |music|
     args = [ music[:name], width_name,
              music[:price], width_price,
              music[:date], width_date ]
     puts dataformatstr%args
   end
   puts ""
-  
-  #TODO: option to print all free music
 end
 
 def stats_by_wday apps
@@ -503,8 +544,8 @@ music_stats = gen_stats(music)
 list_apps options, app_stats
 list_music options, music_stats
 
-stats_by_wday apps
-stats_by_months apps
+stats_by_wday apps+music
+stats_by_months apps+music
 fartapps apps
 
 #Show statistics?
@@ -518,7 +559,11 @@ if options[:appstats]
   puts "    Total paid apps: #{app_stats[:paid_names_set].length}"
   puts " Total paid updates: #{app_stats[:paid_updates]}"
   #take an amount and replace the value to get the right currency
-  spent_str = app_stats[:paid].first[:price].sub(/\d+.\d+/, app_stats[:money_spent].to_s)
+  if app_stats[:paid].first
+    spent_str = app_stats[:paid].first[:price].sub(/\d+.\d+/, app_stats[:money_spent].to_s)
+  else
+    spent_str = "None"
+  end
   puts "Total spent on apps: #{spent_str}"
 end
 
@@ -531,13 +576,21 @@ if options[:musicstats]
   puts "    Total free music: #{music_stats[:free_names_set].length}"
   puts "    Total paid music: #{music_stats[:paid_names_set].length}"
   #take an amount and replace the value to get the right currency
-  spent_str = music_stats[:paid].first[:price].sub(/\d+.\d+/, music_stats[:money_spent].to_s)
+  if music_stats[:paid].first
+    spent_str = music_stats[:paid].first[:price].sub(/\d+.\d+/, music_stats[:money_spent].to_s)
+  else
+    spent_str = "None"
+  end
   puts "Total spent on music: #{spent_str}"
 end
 
 puts ""
 #take an amount and replace the value to get the right currency
-spent_str = app_stats[:paid].first[:price].sub(/\d+.\d+/, (app_stats[:money_spent] + music_stats[:money_spent]).to_s)
+if item = (app_stats[:paid].first || music_stats[:paid].first)
+  spent_str = item[:price].sub(/\d+.\d+/, (app_stats[:money_spent] + music_stats[:money_spent]).to_s)
+else
+  spent_str = "None"
+end
 puts "Total spent in the iTunes Store: #{spent_str}"
 
 items = data.map do |mail|
